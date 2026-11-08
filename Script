@@ -1,0 +1,1587 @@
+--=============================================================
+--  VENICE HUB  ·  v2
+--  Movimiento · Fly · Noclip · AutoClicker · Vehículo ·
+--  Aimbot(FOV) · ESP RGB · Waypoints
+--  Xeno Executor (PC / Android)
+--  Teclas: K UI | F fly | N noclip | C clicker | G aimbot | P esp
+--=============================================================
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local UIS         = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local TweenService= game:GetService("TweenService")
+local VIM         = game:GetService("VirtualInputManager")
+
+local LP = Players.LocalPlayer
+if not LP then return end
+
+if _G.VeniceHubCleanup then pcall(_G.VeniceHubCleanup) end
+
+local guiParent
+if gethui then
+    local ok, res = pcall(gethui)
+    if ok and res then guiParent = res end
+end
+if not guiParent then
+    guiParent = LP:FindFirstChildOfClass("PlayerGui") or LP:WaitForChild("PlayerGui", 10)
+end
+if not guiParent then return end
+
+--=============================================================
+--  ESTADO
+--=============================================================
+local fly      = { active = false, speed = 60, keys = {} }
+local noclip   = { active = false, saved = {}, conn = nil }
+local move     = { ws = 16, jp = 50, hip = 2, force = true }
+local clicker  = { active = false, interval = 100, pos = nil, conn = nil }
+local veh      = { speedOn = false, speed = 120, flyOn = false, conns = {}, bv = nil, bg = nil, anchored = {} }
+local aim      = { active = false, fov = 220, smooth = 0.35, team = true, walls = true, circle = nil }
+local esp      = { active = false, team = true, maxDist = 600, layer = nil, items = {} }
+local runtime  = { espLoop = true }
+
+local flyConns = {}
+local conns    = {}
+local bv, bg
+local WAYPOINT_FILE = "VeniceHub_waypoints.json"
+local waypoints = {}
+
+local C = {
+    bg      = Color3.fromRGB(12, 12, 17),
+    panel   = Color3.fromRGB(20, 20, 27),
+    card    = Color3.fromRGB(24, 24, 33),
+    track   = Color3.fromRGB(44, 44, 58),
+    accent  = Color3.fromRGB(139, 92, 246),
+    accent2 = Color3.fromRGB(34, 211, 238),
+    text    = Color3.fromRGB(240, 240, 248),
+    dim     = Color3.fromRGB(138, 138, 158),
+    good    = Color3.fromRGB(52, 211, 153),
+    bad     = Color3.fromRGB(244, 63, 94),
+}
+
+local function new(class, props, parent)
+    local o = Instance.new(class)
+    if props then for k, v in pairs(props) do o[k] = v end end
+    if parent then o.Parent = parent end
+    return o
+end
+
+local function track(c)
+    if c then table.insert(conns, c) end
+    return c
+end
+
+local function corner(o, r)
+    return new("UICorner", { CornerRadius = UDim.new(0, r) }, o)
+end
+
+local function gradient(o, a, b, rot, transp)
+    local g = new("UIGradient", { Rotation = rot or 0 }, o)
+    g.Color = ColorSequence.new(a, b)
+    if transp then g.Transparency = transp end
+    return g
+end
+
+--=============================================================
+--  GUI
+--=============================================================
+local screen = new("ScreenGui", {
+    Name = "VeniceHub",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+}, guiParent)
+
+-- capa del ESP
+local espLayer = new("Frame", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    ZIndex = 3,
+    Visible = false,
+}, screen)
+
+local main = new("Frame", {
+    Size = UDim2.fromOffset(290, 470),
+    Position = UDim2.new(0, 18, 0.5, -235),
+    BackgroundColor3 = C.bg,
+    BorderSizePixel = 0,
+    ZIndex = 10,
+}, screen)
+corner(main, 16)
+new("UIStroke", { Color = C.accent, Transparency = 0.75, Thickness = 1.4 }, main)
+
+local header = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 46),
+    BackgroundColor3 = C.panel,
+    BorderSizePixel = 0,
+    ZIndex = 11,
+}, main)
+corner(header, 16)
+new("Frame", {
+    Size = UDim2.new(1, 0, 0, 16),
+    Position = UDim2.new(0, 0, 0, 30),
+    BackgroundColor3 = C.panel,
+    BorderSizePixel = 0,
+    ZIndex = 11,
+}, main)
+new("Frame", {
+    Size = UDim2.new(1, 0, 0, 2),
+    Position = UDim2.new(0, 0, 1, -2),
+    BackgroundColor3 = C.accent,
+    BorderSizePixel = 0,
+    ZIndex = 12,
+}, header)
+gradient(header:FindFirstChildWhichIsA("Frame"), C.accent, C.accent2, 90)
+
+local logo = new("Frame", {
+    Size = UDim2.fromOffset(24, 24),
+    Position = UDim2.new(0, 14, 0.5, -12),
+    BackgroundColor3 = C.accent,
+    BorderSizePixel = 0,
+    ZIndex = 12,
+}, header)
+corner(logo, 8)
+gradient(logo, C.accent, C.accent2, 45)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -110, 0, 16),
+    Position = UDim2.new(0, 46, 0, 10),
+    BackgroundTransparency = 1,
+    Text = "VENICE HUB",
+    TextColor3 = C.text,
+    Font = Enum.Font.GothamBold,
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 12,
+}, header)
+
+new("TextLabel", {
+    Size = UDim2.new(1, -110, 0, 14),
+    Position = UDim2.new(0, 46, 0, 26),
+    BackgroundTransparency = 1,
+    Text = "universal · v2",
+    TextColor3 = C.dim,
+    Font = Enum.Font.Gotham,
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 12,
+}, header)
+
+local function headerBtn(txt, x)
+    local b = new("TextButton", {
+        Size = UDim2.fromOffset(24, 24),
+        Position = UDim2.new(1, x, 0.5, -12),
+        BackgroundColor3 = C.card,
+        Text = txt,
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        ZIndex = 12,
+    }, header)
+    corner(b, 7)
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = C.track end)
+    b.MouseLeave:Connect(function() b.BackgroundColor3 = C.card end)
+    return b
+end
+local minBtn   = headerBtn("–", -62)
+local closeBtn = headerBtn("×", -32)
+
+local body = new("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 1, -46),
+    Position = UDim2.new(0, 0, 0, 46),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 3,
+    ScrollBarImageColor3 = C.accent,
+    ScrollBarImageTransparency = 0.4,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    ZIndex = 11,
+}, main)
+new("UIPadding", {
+    PaddingTop = UDim.new(0, 12),
+    PaddingLeft = UDim.new(0, 10),
+    PaddingRight = UDim.new(0, 10),
+    PaddingBottom = UDim.new(0, 16),
+}, body)
+new("UIListLayout", { Padding = UDim.new(0, 10), SortOrder = Enum.SortOrder.LayoutOrder }, body)
+
+local order = 0
+local function nextOrder() order = order + 1 return order end
+
+-- tarjeta de sección
+local function card(titleText)
+    local c = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundColor3 = C.card,
+        BorderSizePixel = 0,
+        LayoutOrder = nextOrder(),
+        ZIndex = 12,
+    }, body)
+    corner(c, 12)
+    new("UIStroke", { Color = C.track, Transparency = 0.55, Thickness = 1 }, c)
+    new("UIPadding", {
+        PaddingTop = UDim.new(0, 11),
+        PaddingBottom = UDim.new(0, 11),
+        PaddingLeft = UDim.new(0, 11),
+        PaddingRight = UDim.new(0, 11),
+    }, c)
+
+    local inner = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        AutomaticSize = Enum.AutomaticSize.Y,
+        BackgroundTransparency = 1,
+        ZIndex = 12,
+    }, c)
+    new("UIListLayout", { Padding = UDim.new(0, 9), SortOrder = Enum.SortOrder.LayoutOrder }, inner)
+
+    local head = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 14),
+        BackgroundTransparency = 1,
+        LayoutOrder = 1,
+        ZIndex = 12,
+    }, inner)
+    local bar = new("Frame", {
+        Size = UDim2.fromOffset(3, 11),
+        Position = UDim2.new(0, 0, 0.5, -5.5),
+        BackgroundColor3 = C.accent,
+        BorderSizePixel = 0,
+        ZIndex = 12,
+    }, head)
+    corner(bar, 2)
+    gradient(bar, C.accent, C.accent2, 90)
+    new("TextLabel", {
+        Size = UDim2.new(1, -10, 1, 0),
+        Position = UDim2.fromOffset(10, 0),
+        BackgroundTransparency = 1,
+        Text = string.upper(titleText),
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 12,
+    }, head)
+
+    return inner
+end
+
+-- interruptor tipo switch
+local function toggle(parent, labelText, default, onClick)
+    local row = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1,
+        LayoutOrder = nextOrder(),
+        ZIndex = 12,
+    }, parent)
+
+    local lbl = new("TextLabel", {
+        Size = UDim2.new(1, -52, 1, 0),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 12,
+    }, row)
+
+    local pill = new("Frame", {
+        Size = UDim2.fromOffset(40, 20),
+        Position = UDim2.new(1, -40, 0.5, -10),
+        BackgroundColor3 = C.track,
+        BorderSizePixel = 0,
+        ZIndex = 12,
+    }, row)
+    corner(pill, 10)
+
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(14, 14),
+        Position = UDim2.fromOffset(3, 3),
+        BackgroundColor3 = Color3.fromRGB(205, 205, 220),
+        BorderSizePixel = 0,
+        ZIndex = 13,
+    }, pill)
+    corner(knob, 7)
+
+    local state = false
+    local function set(v, silent)
+        v = v and true or false
+        state = v
+        TweenService:Create(knob, TweenInfo.new(0.14), {
+            Position = UDim2.fromOffset(v and 23 or 3, 3),
+        }):Play()
+        TweenService:Create(pill, TweenInfo.new(0.14), {
+            BackgroundColor3 = v and C.accent or C.track,
+        }):Play()
+        lbl.TextColor3 = v and C.text or C.dim
+        if not silent then onClick(v) end
+    end
+
+    local hit = new("TextButton", {
+        Size = UDim2.fromScale(1, 1),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 14,
+    }, row)
+    hit.MouseButton1Click:Connect(function() set(not state) end)
+
+    if default then set(true, true) end
+    return set
+end
+
+-- deslizador con arrastre
+local function slider(parent, labelText, min, max, default, callback)
+    local wrap = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundTransparency = 1,
+        LayoutOrder = nextOrder(),
+        ZIndex = 12,
+    }, parent)
+
+    local lbl = new("TextLabel", {
+        Size = UDim2.new(1, -68, 0, 16),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 12,
+    }, wrap)
+
+    local box = new("TextBox", {
+        Size = UDim2.fromOffset(62, 18),
+        Position = UDim2.new(1, -62, 0, 0),
+        BackgroundColor3 = C.panel,
+        Text = tostring(default),
+        TextColor3 = C.text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        BorderSizePixel = 0,
+        ClearTextOnFocus = false,
+        ZIndex = 12,
+    }, wrap)
+    corner(box, 6)
+    new("UIStroke", { Color = C.accent, Transparency = 0.7 }, box)
+
+    local trackBar = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 5),
+        Position = UDim2.new(0, 0, 0, 28),
+        BackgroundColor3 = C.track,
+        BorderSizePixel = 0,
+        ZIndex = 12,
+    }, wrap)
+    corner(trackBar, 3)
+
+    local fill = new("Frame", {
+        Size = UDim2.fromScale(0, 1),
+        BackgroundColor3 = C.accent,
+        BorderSizePixel = 0,
+        ZIndex = 13,
+    }, trackBar)
+    corner(fill, 3)
+    gradient(fill, C.accent, C.accent2, 0)
+
+    local knob = new("Frame", {
+        Size = UDim2.fromOffset(11, 11),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0, 0, 0.5, 0),
+        BackgroundColor3 = C.text,
+        BorderSizePixel = 0,
+        ZIndex = 14,
+    }, trackBar)
+    corner(knob, 6)
+
+    local value = default
+    local function apply(v)
+        value = math.clamp(v, min, max)
+        local alpha = (value - min) / (max - min)
+        fill.Size = UDim2.fromScale(alpha, 1)
+        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+        box.Text = tostring(math.floor(value * 100 + 0.5) / 100)
+        callback(value)
+    end
+
+    local hit = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 18),
+        Position = UDim2.new(0, 0, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "",
+        ZIndex = 15,
+    }, wrap)
+
+    local dragging = false
+    local function fromX(x)
+        local rel = (x - trackBar.AbsolutePosition.X) / math.max(trackBar.AbsoluteSize.X, 1)
+        apply(min + rel * (max - min))
+    end
+
+    hit.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            fromX(i.Position.X)
+        end
+    end)
+    track(UIS.InputChanged:Connect(function(i)
+        if not dragging then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch then
+            fromX(i.Position.X)
+        end
+    end))
+    track(UIS.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end))
+
+    box.FocusLost:Connect(function()
+        local n = tonumber(box.Text)
+        if n then apply(n) else apply(value) end
+    end)
+
+    apply(default)
+end
+
+-- botón
+local function button(parent, text, style, layoutOrder)
+    local b = new("TextButton", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundColor3 = style == "accent" and C.accent or (style == "bad" and C.bad or C.panel),
+        Text = text,
+        TextColor3 = style and C.text or C.dim,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 12,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        LayoutOrder = layoutOrder or nextOrder(),
+        ZIndex = 12,
+    }, parent)
+    corner(b, 8)
+    if style == "accent" then gradient(b, C.accent, C.accent2, 0) end
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = style == "accent" and C.accent2 or C.track end)
+    b.MouseLeave:Connect(function()
+        b.BackgroundColor3 = style == "accent" and C.accent or (style == "bad" and C.bad or C.panel)
+    end)
+    return b
+end
+
+-- barra de estado y botón de pánico (se crean primero)
+local statusBar = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 22),
+    BackgroundColor3 = C.card,
+    BorderSizePixel = 0,
+    LayoutOrder = 1000000,
+    ZIndex = 12,
+}, body)
+corner(statusBar, 8)
+local statusDot = new("Frame", {
+    Size = UDim2.fromOffset(5, 5),
+    Position = UDim2.new(0, 10, 0.5, -2.5),
+    BackgroundColor3 = C.dim,
+    BorderSizePixel = 0,
+    ZIndex = 12,
+}, statusBar)
+corner(statusDot, 3)
+local status = new("TextLabel", {
+    Size = UDim2.new(1, -22, 1, 0),
+    Position = UDim2.fromOffset(20, 0),
+    BackgroundTransparency = 1,
+    Text = "Listo",
+    TextColor3 = C.dim,
+    Font = Enum.Font.GothamMedium,
+    TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    ZIndex = 12,
+}, statusBar)
+
+local panicBtn = button(body, "Apagar todo", "bad", 999999)
+
+local function notify(text, color)
+    if not status or not status.Parent then return end
+    status.Text = text
+    status.TextColor3 = color or C.dim
+    statusDot.BackgroundColor3 = color or C.dim
+    task.delay(2.5, function()
+        if status and status.Parent and status.Text == text then
+            status.Text = "Listo"
+            status.TextColor3 = C.dim
+            statusDot.BackgroundColor3 = C.dim
+        end
+    end)
+end
+
+--=============================================================
+--  TARJETAS
+--=============================================================
+local cMove = card("Movimiento")
+slider(cMove, "Velocidad de caminata", 1, 500, 16, function(v) move.ws = v end)
+slider(cMove, "Salto / escaleras", 1, 500, 50, function(v) move.jp = v end)
+slider(cMove, "Altura de paso", 0, 12, 2, function(v) move.hip = v end)
+local setForce = toggle(cMove, "Forzar valores", true, function(v) move.force = v end)
+
+local cFly = card("Vuelo")
+local setFlyVisual = toggle(cFly, "Activar vuelo", false, function(v)
+    if v then startFly() else stopFly() end
+end)
+slider(cFly, "Velocidad de vuelo", 5, 2000, 60, function(v) fly.speed = v end)
+
+local pad = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 66),
+    BackgroundTransparency = 1,
+    Visible = UIS.TouchEnabled,
+    LayoutOrder = nextOrder(),
+    ZIndex = 12,
+}, cFly)
+new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, pad)
+
+local function padRow()
+    local r = new("Frame", {
+        Size = UDim2.new(1, 0, 0, 30),
+        BackgroundTransparency = 1,
+        LayoutOrder = nextOrder(),
+        ZIndex = 12,
+    }, pad)
+    new("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        Padding = UDim.new(0, 6),
+        SortOrder = Enum.SortOrder.LayoutOrder,
+    }, r)
+    return r
+end
+
+local function holdButton(parent, label, key, ord)
+    local b = new("TextButton", {
+        Size = UDim2.new(1 / 4, -5, 1, 0),
+        BackgroundColor3 = C.panel,
+        Text = label,
+        TextColor3 = C.text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        LayoutOrder = ord,
+        ZIndex = 13,
+    }, parent)
+    corner(b, 7)
+    local function down()
+        fly.keys[key] = true
+        b.BackgroundColor3 = C.accent
+    end
+    local function up()
+        fly.keys[key] = false
+        b.BackgroundColor3 = C.panel
+    end
+    b.MouseButton1Down:Connect(down)
+    b.MouseButton1Up:Connect(up)
+    b.MouseLeave:Connect(up)
+    b.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch then down() end
+    end)
+    b.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch then up() end
+    end)
+end
+
+local r1 = padRow()
+holdButton(r1, "↑", "Space", 1)
+holdButton(r1, "↓", "Ctrl", 2)
+holdButton(r1, "W", "W", 3)
+holdButton(r1, "S", "S", 4)
+local r2 = padRow()
+holdButton(r2, "←", "A", 1)
+holdButton(r2, "→", "D", 2)
+
+local cCol = card("Colisiones")
+local setNoclipVisual = toggle(cCol, "Noclip", false, function(v) setNoclip(v) end)
+
+local cClick = card("Auto clicker")
+local pickBtn = button(cClick, "Marcar zona en pantalla", "accent")
+local setClickVisual = toggle(cClick, "Activar auto clicker", false, function(v)
+    if v then startClicker() else stopClicker() end
+end)
+slider(cClick, "Intervalo (ms)", 1, 10000, 100, function(v) clicker.interval = v end)
+
+local presets = new("Frame", {
+    Size = UDim2.new(1, 0, 0, 24),
+    BackgroundTransparency = 1,
+    LayoutOrder = nextOrder(),
+    ZIndex = 12,
+}, cClick)
+new("UIListLayout", {
+    FillDirection = Enum.FillDirection.Horizontal,
+    Padding = UDim.new(0, 5),
+    SortOrder = Enum.SortOrder.LayoutOrder,
+}, presets)
+
+local presetOrder = 0
+local function preset(text, ms)
+    presetOrder = presetOrder + 1
+    local b = new("TextButton", {
+        Size = UDim2.new(1 / 5, -4, 1, 0),
+        BackgroundColor3 = C.panel,
+        Text = text,
+        TextColor3 = C.dim,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 10,
+        BorderSizePixel = 0,
+        AutoButtonColor = false,
+        LayoutOrder = presetOrder,
+        ZIndex = 13,
+    }, presets)
+    corner(b, 6)
+    b.MouseButton1Click:Connect(function()
+        clicker.interval = ms
+        notify("Intervalo: " .. ms .. " ms")
+    end)
+end
+preset("1ms", 1)
+preset("10ms", 10)
+preset("50ms", 50)
+preset("100ms", 100)
+preset("1s", 1000)
+
+local marker = new("Frame", {
+    Size = UDim2.fromOffset(20, 20),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundTransparency = 1,
+    Visible = false,
+    ZIndex = 20,
+}, screen)
+new("UIStroke", { Color = C.accent, Thickness = 2 }, marker)
+
+local cVeh = card("Vehículo")
+local setVehSpeedVisual = toggle(cVeh, "Acelerar vehículo", false, function(v) vehToggleSpeed(v) end)
+slider(cVeh, "Velocidad del vehículo", 20, 2000, 120, function(v) veh.speed = v end)
+local setVehFlyVisual = toggle(cVeh, "Vehículo volador", false, function(v) vehToggleFly(v) end)
+
+local cAim = card("Aimbot")
+local setAimVisual = toggle(cAim, "Activar aimbot", false, function(v) setAim(v) end)
+slider(cAim, "FOV (radio px)", 20, 600, 220, function(v) aim.fov = v end)
+slider(cAim, "Suavizado", 0.05, 1, 0.35, function(v) aim.smooth = v end)
+local setAimTeam = toggle(cAim, "Ignorar equipo", true, function(v) aim.team = v end)
+local setAimWalls = toggle(cAim, "Solo visibles", true, function(v) aim.walls = v end)
+
+local cEsp = card("ESP")
+local setEspVisual = toggle(cEsp, "Activar ESP", false, function(v) setESP(v) end)
+slider(cEsp, "Distancia máxima", 50, 2000, 600, function(v) esp.maxDist = v end)
+local setEspTeam = toggle(cEsp, "Ignorar equipo", true, function(v)
+    esp.team = v
+    if esp.active then
+        clearESP()
+        buildAllESP()
+    end
+end)
+
+local cTp = card("Teletransporte")
+local nameBox = new("TextBox", {
+    Size = UDim2.new(1, 0, 0, 30),
+    BackgroundColor3 = C.panel,
+    Text = "",
+    PlaceholderText = "Nombre del punto...",
+    PlaceholderColor3 = C.dim,
+    TextColor3 = C.text,
+    Font = Enum.Font.GothamMedium,
+    TextSize = 12,
+    BorderSizePixel = 0,
+    LayoutOrder = nextOrder(),
+    ZIndex = 12,
+}, cTp)
+corner(nameBox, 8)
+new("UIStroke", { Color = C.accent, Transparency = 0.7 }, nameBox)
+
+local saveBtn = button(cTp, "Guardar mi posición", "accent")
+
+local list = new("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 118),
+    BackgroundColor3 = C.bg,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 2,
+    ScrollBarImageColor3 = C.accent,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    LayoutOrder = nextOrder(),
+    ZIndex = 12,
+}, cTp)
+corner(list, 8)
+new("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5) }, list)
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, list)
+
+local emptyLabel = new("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 24),
+    BackgroundTransparency = 1,
+    Text = "Sin puntos guardados",
+    TextColor3 = C.dim,
+    Font = Enum.Font.Gotham,
+    TextSize = 11,
+    LayoutOrder = 1,
+}, list)
+
+local spawnBtn = button(cTp, "Ir al spawn del mapa")
+
+local cPlr = card("Jugadores")
+local playersList = new("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 108),
+    BackgroundColor3 = C.bg,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 2,
+    ScrollBarImageColor3 = C.accent,
+    CanvasSize = UDim2.new(0, 0, 0, 0),
+    AutomaticCanvasSize = Enum.AutomaticSize.Y,
+    LayoutOrder = nextOrder(),
+    ZIndex = 12,
+}, cPlr)
+corner(playersList, 8)
+new("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5) }, playersList)
+new("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder }, playersList)
+
+local refreshBtn = button(cPlr, "Actualizar lista")
+
+--=============================================================
+--  VENTANA
+--=============================================================
+local function clampPosition(x, y)
+    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+    local w, h = main.AbsoluteSize.X, main.AbsoluteSize.Y
+    return math.clamp(x, -(w - 60), vp.X - 60), math.clamp(y, 0, math.max(0, vp.Y - h))
+end
+
+do
+    local dragging, dragStart, startPos
+    track(header.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = i.Position
+            startPos = main.Position
+            local c
+            c = i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if c then c:Disconnect() end
+                end
+            end)
+        end
+    end))
+    track(UIS.InputChanged:Connect(function(i)
+        if not dragging then return end
+        if i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch then
+            local d = i.Position - dragStart
+            local x, y = clampPosition(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
+            main.Position = UDim2.new(0, x, 0, y)
+        end
+    end))
+end
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    body.Visible = not minimized
+    main.Size = minimized and UDim2.fromOffset(290, 46) or UDim2.fromOffset(290, 470)
+    minBtn.Text = minimized and "+" or "–"
+end)
+closeBtn.MouseButton1Click:Connect(function() screen.Enabled = false end)
+
+--=============================================================
+--  MOVIMIENTO
+--=============================================================
+track(RunService.Heartbeat:Connect(function()
+    if not move.force then return end
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if hum.WalkSpeed ~= move.ws then hum.WalkSpeed = move.ws end
+    if not hum.UseJumpPower then hum.UseJumpPower = true end
+    if hum.JumpPower ~= move.jp then hum.JumpPower = move.jp end
+    if hum.HipHeight ~= move.hip then hum.HipHeight = move.hip end
+end))
+
+--=============================================================
+--  FLY
+--=============================================================
+function stopFly()
+    fly.active = false
+    for _, c in ipairs(flyConns) do pcall(function() c:Disconnect() end) end
+    table.clear(flyConns)
+    table.clear(fly.keys)
+    if bv then bv:Destroy() bv = nil end
+    if bg then bg:Destroy() bg = nil end
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then pcall(function() hum.PlatformStand = false end) end
+    if setFlyVisual then setFlyVisual(false, true) end
+end
+
+function startFly()
+    local char = LP.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then notify("Personaje no cargado", C.bad) return end
+    if hrp.Anchored then hrp.Anchored = false end
+
+    fly.active = true
+    pcall(function() hum.PlatformStand = true end)
+
+    bv = new("BodyVelocity", { MaxForce = Vector3.new(1e5, 1e5, 1e5), Velocity = Vector3.zero }, hrp)
+    bg = new("BodyGyro", { MaxTorque = Vector3.new(1e5, 1e5, 1e5), P = 1e4, D = 500 }, hrp)
+
+    local cam = workspace.CurrentCamera
+    table.insert(flyConns, RunService.RenderStepped:Connect(function()
+        if not fly.active or not screen.Parent then return end
+        local c = LP.Character
+        local h = c and c:FindFirstChild("HumanoidRootPart")
+        if not h then return end
+        if bv.Parent ~= h then bv.Parent = h end
+        if bg.Parent ~= h then bg.Parent = h end
+
+        local cf = cam.CFrame
+        local dir = Vector3.zero
+        if fly.keys.W or UIS:IsKeyDown(Enum.KeyCode.W) then dir += cf.LookVector end
+        if fly.keys.S or UIS:IsKeyDown(Enum.KeyCode.S) then dir -= cf.LookVector end
+        if fly.keys.D or UIS:IsKeyDown(Enum.KeyCode.D) then dir += cf.RightVector end
+        if fly.keys.A or UIS:IsKeyDown(Enum.KeyCode.A) then dir -= cf.RightVector end
+        if fly.keys.Space or UIS:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.yAxis end
+        if fly.keys.Ctrl or UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.yAxis end
+        if dir.Magnitude > 0 then dir = dir.Unit end
+
+        bv.Velocity = dir * fly.speed
+        bg.CFrame = cf
+    end))
+
+    if setFlyVisual then setFlyVisual(true, true) end
+    notify("Vuelo activado", C.good)
+end
+
+--=============================================================
+--  NOCLIP
+--=============================================================
+function setNoclip(state)
+    state = state and true or false
+    if noclip.active == state then return end
+    noclip.active = state
+    if state then
+        noclip.conn = RunService.Stepped:Connect(function()
+            local char = LP.Character
+            if not char then return end
+            for _, p in ipairs(char:GetDescendants()) do
+                if p:IsA("BasePart") and p.CanCollide then
+                    noclip.saved[p] = true
+                    p.CanCollide = false
+                end
+            end
+        end)
+        notify("Noclip activado", C.good)
+    else
+        if noclip.conn then noclip.conn:Disconnect() noclip.conn = nil end
+        for part in pairs(noclip.saved) do
+            if part and part.Parent then pcall(function() part.CanCollide = true end) end
+        end
+        table.clear(noclip.saved)
+        notify("Noclip desactivado")
+    end
+    if setNoclipVisual then setNoclipVisual(state, true) end
+end
+
+--=============================================================
+--  AUTO CLICKER
+--=============================================================
+local lastClickPos
+local function doClick(pos)
+    pcall(function()
+        if lastClickPos ~= pos then
+            VIM:SendMouseMoveEvent(pos, workspace.CurrentCamera)
+            lastClickPos = pos
+        end
+        VIM:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 1)
+        VIM:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 1)
+    end)
+end
+
+function startClicker()
+    if not clicker.pos then notify("Marca una zona primero", C.bad) return end
+    if clicker.active then return end
+    clicker.active = true
+    lastClickPos = nil
+    task.spawn(function()
+        while clicker.active do
+            local pos = clicker.pos
+            if pos then doClick(pos) end
+            task.wait(math.max(clicker.interval, 1) / 1000)
+        end
+    end)
+    if setClickVisual then setClickVisual(true, true) end
+    notify("Auto clicker activado", C.good)
+end
+
+function stopClicker()
+    if not clicker.active then return end
+    clicker.active = false
+    if setClickVisual then setClickVisual(false, true) end
+    notify("Auto clicker desactivado")
+end
+
+--=============================================================
+--  VEHÍCULO
+--=============================================================
+local function getSeat()
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local seat = hum and hum.SeatPart
+    if seat and seat:IsA("VehicleSeat") then return seat end
+    return nil
+end
+
+local function vehDestroyForces()
+    if veh.bv then veh.bv:Destroy() veh.bv = nil end
+    if veh.bg then veh.bg:Destroy() veh.bg = nil end
+end
+
+local function vehLoop()
+    for _, c in ipairs(veh.conns) do pcall(function() c:Disconnect() end) end
+    table.clear(veh.conns)
+    table.clear(veh.anchored)
+
+    table.insert(veh.conns, RunService.Heartbeat:Connect(function()
+        if not (veh.speedOn or veh.flyOn) then return end
+        local seat = getSeat()
+        if not seat then return end
+
+        local root = seat.AssemblyRootPart
+        if not root then return end
+        if veh.anchored[root] == nil then veh.anchored[root] = root.Anchored end
+        if root.Anchored then root.Anchored = false end
+
+        if not veh.bv or veh.bv.Parent ~= root then
+            vehDestroyForces()
+            veh.bv = new("BodyVelocity", { MaxForce = Vector3.new(1e6, 1e6, 1e6), Velocity = Vector3.zero }, root)
+        end
+        if veh.flyOn then
+            if not veh.bg or veh.bg.Parent ~= root then
+                if veh.bg then veh.bg:Destroy() end
+                veh.bg = new("BodyGyro", { MaxTorque = Vector3.new(1e6, 1e6, 1e6), P = 1e4, D = 500 }, root)
+            end
+            veh.bg.CFrame = CFrame.new(root.Position) * (seat.CFrame - seat.CFrame.Position)
+        end
+
+        local throttle = seat.ThrottleFloat
+        local velocity = Vector3.zero
+        if veh.speedOn and math.abs(throttle) > 0.05 then
+            velocity += seat.CFrame.LookVector * veh.speed * throttle
+        end
+        if veh.flyOn then
+            if fly.keys.Space or UIS:IsKeyDown(Enum.KeyCode.Space) then
+                velocity += Vector3.yAxis * veh.speed
+            elseif fly.keys.Ctrl or UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+                velocity -= Vector3.yAxis * veh.speed
+            end
+        end
+        veh.bv.Velocity = velocity
+    end))
+end
+
+local function vehStopAll()
+    veh.speedOn = false
+    veh.flyOn = false
+    if setVehSpeedVisual then setVehSpeedVisual(false, true) end
+    if setVehFlyVisual then setVehFlyVisual(false, true) end
+    for _, c in ipairs(veh.conns) do pcall(function() c:Disconnect() end) end
+    table.clear(veh.conns)
+    vehDestroyForces()
+    for root, state in pairs(veh.anchored) do
+        if root and root.Parent then pcall(function() root.Anchored = state end) end
+    end
+    table.clear(veh.anchored)
+end
+
+function vehToggleSpeed(state)
+    state = state and true or false
+    if state == veh.speedOn then return end
+    veh.speedOn = state
+    if veh.speedOn or veh.flyOn then
+        if #veh.conns == 0 then vehLoop() end
+        notify("Aceleración de vehículo activada", C.good)
+    else
+        vehStopAll()
+        notify("Vehículo restaurado")
+    end
+end
+
+function vehToggleFly(state)
+    state = state and true or false
+    if state == veh.flyOn then return end
+    veh.flyOn = state
+    if veh.speedOn or veh.flyOn then
+        if #veh.conns == 0 then vehLoop() end
+        notify(veh.flyOn and "Vehículo volador activado" or "Vuelo de vehículo desactivado",
+            veh.flyOn and C.good or C.dim)
+    else
+        vehStopAll()
+    end
+end
+
+--=============================================================
+--  AIMBOT
+--=============================================================
+aim.circle = new("Frame", {
+    Size = UDim2.fromOffset(aim.fov * 2, aim.fov * 2),
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    BackgroundTransparency = 1,
+    Visible = false,
+    ZIndex = 19,
+}, screen)
+corner(aim.circle, 999)
+local aimStroke = new("UIStroke", { Color = C.accent, Thickness = 1.5, Transparency = 0.35 }, aim.circle)
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude or Enum.RaycastFilterType.Blacklist
+rayParams.IgnoreWater = true
+
+local function isVisible(head, char)
+    if not aim.walls then return true end
+    local cam = workspace.CurrentCamera
+    local filter = {}
+    if LP.Character then table.insert(filter, LP.Character) end
+    table.insert(filter, char)
+    rayParams.FilterDescendantsInstances = filter
+    local result = workspace:Raycast(cam.CFrame.Position, head.Position - cam.CFrame.Position, rayParams)
+    if not result then return true end
+    return result.Instance:IsDescendantOf(char)
+end
+
+local function validTarget(plr)
+    if plr == LP then return nil end
+    if aim.team and plr.Team and LP.Team and plr.Team == LP.Team then return nil end
+    local char = plr.Character
+    if not char then return nil end
+    local head = char:FindFirstChild("Head")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not head or not hum or hum.Health <= 0 then return nil end
+    return head, char
+end
+
+local function getTarget(mousePos)
+    local best, bestDist
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local head, char = validTarget(plr)
+        if head then
+            local sp, onScreen = workspace.CurrentCamera:WorldToViewportPoint(head.Position)
+            if onScreen then
+                local d = (Vector2.new(sp.X, sp.Y) - mousePos).Magnitude
+                if d <= aim.fov and (not bestDist or d < bestDist) and isVisible(head, char) then
+                    best = head
+                    bestDist = d
+                end
+            end
+        end
+    end
+    return best
+end
+
+function setAim(state)
+    state = state and true or false
+    if aim.active == state then return end
+    aim.active = state
+    if setAimVisual then setAimVisual(state, true) end
+    if aim.circle then aim.circle.Visible = state end
+    notify(state and "Aimbot activado" or "Aimbot desactivado", state and C.good or C.dim)
+end
+
+track(RunService.RenderStepped:Connect(function()
+    if not aim.active or not aim.circle or not aim.circle.Parent then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+    local mouse = UIS:GetMouseLocation()
+
+    aim.circle.Size = UDim2.fromOffset(aim.fov * 2, aim.fov * 2)
+    aim.circle.Position = UDim2.fromOffset(mouse.X, mouse.Y)
+
+    local target = getTarget(mouse)
+    if target then
+        cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, target.Position),
+            math.clamp(aim.smooth, 0.02, 1))
+    end
+end))
+
+--=============================================================
+--  ESP  ·  cajas RGB 2D
+--=============================================================
+local BOX_PARTS = { "top", "bottom", "left", "right" }
+
+local function removeESP(plr)
+    local item = esp.items[plr]
+    if not item then return end
+    for _, key in ipairs(BOX_PARTS) do
+        if item[key] then item[key]:Destroy() end
+    end
+    if item.fill then item.fill:Destroy() end
+    if item.label then item.label:Destroy() end
+    esp.items[plr] = nil
+end
+
+function clearESP()
+    for plr in pairs(esp.items) do removeESP(plr) end
+    table.clear(esp.items)
+end
+
+local function makeBox(plr)
+    local item = {}
+    item.fill = new("Frame", {
+        BackgroundColor3 = C.accent,
+        BackgroundTransparency = 0.9,
+        BorderSizePixel = 0,
+        Visible = false,
+        ZIndex = 3,
+    }, espLayer)
+    for _, key in ipairs(BOX_PARTS) do
+        item[key] = new("Frame", {
+            BackgroundColor3 = C.accent,
+            BorderSizePixel = 0,
+            Visible = false,
+            ZIndex = 4,
+        }, espLayer)
+    end
+    item.label = new("TextLabel", {
+        BackgroundTransparency = 1,
+        Text = plr.Name,
+        TextColor3 = C.accent,
+        Font = Enum.Font.GothamBold,
+        TextSize = 11,
+        TextStrokeTransparency = 0,
+        TextStrokeColor3 = Color3.new(0, 0, 0),
+        Visible = false,
+        ZIndex = 5,
+    }, espLayer)
+    esp.items[plr] = item
+    return item
+end
+
+local function hideItem(item)
+    item.fill.Visible = false
+    for _, key in ipairs(BOX_PARTS) do item[key].Visible = false end
+    item.label.Visible = false
+end
+
+local function project(char, cam)
+    local ok, cf, size = pcall(char.GetBoundingBox, char)
+    if not ok or not cf then return nil end
+
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local valid = 0
+
+    for i = -1, 1, 2 do
+        for j = -1, 1, 2 do
+            for k = -1, 1, 2 do
+                local world = cf * Vector3.new(i * size.X / 2, j * size.Y / 2, k * size.Z / 2)
+                local sp = cam:WorldToViewportPoint(world)
+                if sp.Z > 0 then
+                    valid = valid + 1
+                    minX = math.min(minX, sp.X)
+                    minY = math.min(minY, sp.Y)
+                    maxX = math.max(maxX, sp.X)
+                    maxY = math.max(maxY, sp.Y)
+                end
+            end
+        end
+    end
+
+    if valid < 4 then return nil end
+    local vp = cam.ViewportSize
+    minX = math.clamp(minX, -80, vp.X + 80)
+    maxX = math.clamp(maxX, -80, vp.X + 80)
+    minY = math.clamp(minY, -80, vp.Y + 80)
+    maxY = math.clamp(maxY, -80, vp.Y + 80)
+    if maxX - minX < 2 or maxY - minY < 2 then return nil end
+    return minX, minY, maxX, maxY
+end
+
+local function updateItem(plr, item, cam, myPos, color)
+    local char = plr.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not char or not hum or not hrp or hum.Health <= 0 then
+        hideItem(item)
+        return
+    end
+    if myPos and (hrp.Position - myPos).Magnitude > esp.maxDist then
+        hideItem(item)
+        return
+    end
+
+    local minX, minY, maxX, maxY = project(char, cam)
+    if not minX then
+        hideItem(item)
+        return
+    end
+
+    local w, h = maxX - minX, maxY - minY
+    item.fill.Position = UDim2.fromOffset(minX, minY)
+    item.fill.Size = UDim2.fromOffset(w, h)
+    item.fill.BackgroundColor3 = color
+    item.fill.Visible = true
+
+    item.top.Position = UDim2.fromOffset(minX, minY)
+    item.top.Size = UDim2.fromOffset(w, 1.5)
+    item.bottom.Position = UDim2.fromOffset(minX, maxY - 1.5)
+    item.bottom.Size = UDim2.fromOffset(w, 1.5)
+    item.left.Position = UDim2.fromOffset(minX, minY)
+    item.left.Size = UDim2.fromOffset(1.5, h)
+    item.right.Position = UDim2.fromOffset(maxX - 1.5, minY)
+    item.right.Size = UDim2.fromOffset(1.5, h)
+
+    for _, key in ipairs(BOX_PARTS) do
+        item[key].BackgroundColor3 = color
+        item[key].Visible = true
+    end
+
+    local dist = myPos and math.floor((hrp.Position - myPos).Magnitude) or 0
+    item.label.Text = string.format("%s  ·  %dm", plr.Name, dist)
+    item.label.TextColor3 = color
+    item.label.Size = UDim2.fromOffset(math.max(w, 90), 14)
+    item.label.Position = UDim2.fromOffset(minX + w / 2 - math.max(w, 90) / 2, minY - 16)
+    item.label.Visible = true
+end
+
+function buildAllESP()
+    if not esp.active then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            local skip = esp.team and plr.Team and LP.Team and plr.Team == LP.Team
+            if not skip then pcall(makeBox, plr) end
+        end
+    end
+end
+
+track(RunService.RenderStepped:Connect(function()
+    if not esp.active then return end
+    local cam = workspace.CurrentCamera
+    if not cam then return end
+
+    local hue = (os.clock() * 0.15) % 1
+    local color = Color3.fromHSV(hue, 0.72, 1)
+
+    local myChar = LP.Character
+    local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myPos = myHrp and myHrp.Position
+
+    for plr, item in pairs(esp.items) do
+        if plr.Parent then
+            updateItem(plr, item, cam, myPos, color)
+        else
+            removeESP(plr)
+        end
+    end
+end))
+
+function setESP(state)
+    state = state and true or false
+    if esp.active == state then return end
+    esp.active = state
+    if setEspVisual then setEspVisual(state, true) end
+    if state then
+        espLayer.Visible = true
+        clearESP()
+        buildAllESP()
+        notify("ESP activado", C.good)
+    else
+        clearESP()
+        espLayer.Visible = false
+        notify("ESP desactivado")
+    end
+end
+
+task.spawn(function()
+    while runtime.espLoop do
+        task.wait(0.4)
+        if esp.active then
+            local known = 0
+            for plr in pairs(esp.items) do
+                known = known + 1
+                local char = plr.Character
+                if not char then removeESP(plr) end
+            end
+            local alive = 0
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LP then alive = alive + 1 end
+            end
+            if known < alive then buildAllESP() end
+        end
+    end
+end)
+
+--=============================================================
+--  TELETRANSPORTE
+--=============================================================
+local function tpTo(position)
+    local char = LP.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then notify("Personaje no cargado", C.bad) return false end
+    if hrp.Anchored then hrp.Anchored = false end
+    if not pcall(function() char:PivotTo(CFrame.new(position + Vector3.new(0, 3, 0))) end) then return false end
+    pcall(function()
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+    end)
+    return true
+end
+
+local function loadWaypoints()
+    local ok, data = pcall(function()
+        if isfile and readfile and isfile(WAYPOINT_FILE) then
+            return HttpService:JSONDecode(readfile(WAYPOINT_FILE))
+        end
+    end)
+    if not ok or type(data) ~= "table" then return end
+    for _, wp in ipairs(data) do
+        if type(wp) == "table" and type(wp.name) == "string" and type(wp.pos) == "table" then
+            local x, y, z = tonumber(wp.pos[1]), tonumber(wp.pos[2]), tonumber(wp.pos[3])
+            if x and y and z then
+                table.insert(waypoints, { name = string.sub(wp.name, 1, 24), pos = { x, y, z } })
+            end
+        end
+    end
+end
+
+local function saveWaypoints()
+    pcall(function()
+        if writefile then writefile(WAYPOINT_FILE, HttpService:JSONEncode(waypoints)) end
+    end)
+end
+
+local function renderWaypoints()
+    for _, child in ipairs(list:GetChildren()) do
+        if child:IsA("Frame") then child:Destroy() end
+    end
+    emptyLabel.Visible = (#waypoints == 0)
+
+    for index, wp in ipairs(waypoints) do
+        local row = new("Frame", {
+            Size = UDim2.new(1, -6, 0, 26),
+            BackgroundColor3 = C.panel,
+            BorderSizePixel = 0,
+            LayoutOrder = index + 1,
+            ZIndex = 12,
+        }, list)
+        corner(row, 6)
+
+        new("TextLabel", {
+            Size = UDim2.new(1, -66, 1, 0),
+            Position = UDim2.fromOffset(8, 0),
+            BackgroundTransparency = 1,
+            Text = wp.name,
+            TextColor3 = C.text,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 11,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 12,
+        }, row)
+
+        local go = new("TextButton", {
+            Size = UDim2.fromOffset(36, 19),
+            Position = UDim2.new(1, -58, 0.5, -9.5),
+            BackgroundColor3 = C.accent,
+            Text = "TP",
+            TextColor3 = C.text,
+            Font = Enum.Font.GothamBold,
+            TextSize = 10,
+            BorderSizePixel = 0,
+            ZIndex = 13,
+        }, row)
+        corner(go, 5)
+        go.MouseButton1Click:Connect(function()
+            if tpTo(Vector3.new(wp.pos[1], wp.pos[2], wp.pos[3])) then
+                notify("Teletransportado a " .. wp.name, C.good)
+            end
+        end)
+
+        local del = new("TextButton", {
+            Size = UDim2.fromOffset(18, 19),
+            Position = UDim2.new(1, -20, 0.5, -9.5),
+            BackgroundColor3 = C.track,
+            Text = "×",
+            TextColor3 = C.dim,
+            Font = Enum.Font.GothamBold,
+            TextSize = 11,
+            BorderSizePixel = 0,
+            ZIndex = 13,
+        }, row)
+        corner(del, 5)
+        del.MouseButton1Click:Connect(function()
+            table.remove(waypoints, index)
+            saveWaypoints()
+            renderWaypoints()
+            notify("Punto eliminado")
+        end)
+    end
+end
+
+--=============================================================
+--  JUGADORES
+--=============================================================
+local function renderPlayers()
+    for _, child in ipairs(playersList:GetChildren()) do
+        if child:IsA("TextButton") or child:IsA("TextLabel") then child:Destroy() end
+    end
+    local index = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then
+            index = index + 1
+            local b = new("TextButton", {
+                Size = UDim2.new(1, -6, 0, 26),
+                BackgroundColor3 = C.panel,
+                Text = "  " .. plr.DisplayName .. "  @" .. plr.Name,
+                TextColor3 = C.text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 11,
+                BorderSizePixel = 0,
+                AutoButtonColor = false,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                LayoutOrder = index,
+                ZIndex = 12,
+            }, playersList)
+            corner(b, 6)
+            b.MouseEnter:Connect(function() b.BackgroundColor3 = C.track end)
+            b.MouseLeave:Connect(function() b.BackgroundColor3 = C.panel end)
+            b.MouseButton1Click:Connect(function()
+                local char = plr.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if not hrp then notify(plr.Name .. " no está cargado", C.bad) return end
+                if tpTo(hrp.Position) then notify("Teletransportado a " .. plr.Name, C.good) end
+            end)
+        end
+    end
+    if index == 0 then
+        new("TextLabel", {
+            Size = UDim2.new(1, -6, 0, 24),
+            BackgroundTransparency = 1,
+            Text = "No hay otros jugadores",
+            TextColor3 = C.dim,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+        }, playersList)
+    end
+end
+
+--=============================================================
+--  BOTONES
+--=============================================================
+pickBtn.MouseButton1Click:Connect(function()
+    if clicker.conn then clicker.conn:Disconnect() clicker.conn = nil end
+    notify("Toca la zona de la pantalla...")
+    task.wait(0.25)
+    clicker.conn = UIS.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local p = input.UserInputType == Enum.UserInputType.Touch and input.Position or UIS:GetMouseLocation()
+            clicker.pos = Vector2.new(p.X, p.Y)
+            marker.Position = UDim2.fromOffset(p.X, p.Y)
+            marker.Visible = true
+            lastClickPos = nil
+            notify("Zona marcada en " .. math.floor(p.X) .. ", " .. math.floor(p.Y), C.good)
+            if clicker.conn then
+                clicker.conn:Disconnect()
+                clicker.conn = nil
+            end
+        end
+    end)
+end)
+
+saveBtn.MouseButton1Click:Connect(function()
+    local char = LP.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then notify("Personaje no cargado", C.bad) return end
+    local name = string.sub(nameBox.Text, 1, 24)
+    if name == "" then name = "Punto " .. (#waypoints + 1) end
+    local p = hrp.Position
+    table.insert(waypoints, { name = name, pos = { p.X, p.Y, p.Z } })
+    nameBox.Text = ""
+    saveWaypoints()
+    renderWaypoints()
+    notify("Punto guardado: " .. name, C.good)
+end)
+
+spawnBtn.MouseButton1Click:Connect(function()
+    local spawnPoint = workspace:FindFirstChildOfClass("SpawnLocation")
+    if spawnPoint then
+        if tpTo(spawnPoint.Position) then notify("Enviado al spawn", C.good) end
+    elseif tpTo(Vector3.zero) then
+        notify("Sin spawn, enviado al origen", C.good)
+    end
+end)
+
+refreshBtn.MouseButton1Click:Connect(renderPlayers)
+
+panicBtn.MouseButton1Click:Connect(function()
+    pcall(stopFly)
+    pcall(setNoclip, false)
+    pcall(stopClicker)
+    pcall(vehStopAll)
+    pcall(setESP, false)
+    pcall(setAim, false)
+    notify("Todo apagado", C.bad)
+end)
+
+--=============================================================
+--  EVENTOS
+--=============================================================
+track(LP.CharacterAdded:Connect(function()
+    task.wait(0.8)
+    if fly.active then
+        stopFly()
+        startFly()
+    end
+end))
+
+track(Players.PlayerAdded:Connect(function() task.delay(0.5, renderPlayers) end))
+track(Players.PlayerRemoving:Connect(function(plr)
+    removeESP(plr)
+    task.delay(0.5, renderPlayers)
+end))
+
+track(UIS.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    local key = input.KeyCode
+    if key == Enum.KeyCode.K then
+        screen.Enabled = not screen.Enabled
+    elseif key == Enum.KeyCode.F then
+        if fly.active then stopFly() else startFly() end
+    elseif key == Enum.KeyCode.N then
+        setNoclip(not noclip.active)
+    elseif key == Enum.KeyCode.C then
+        if clicker.active then stopClicker() else startClicker() end
+    elseif key == Enum.KeyCode.G then
+        setAim(not aim.active)
+    elseif key == Enum.KeyCode.P then
+        setESP(not esp.active)
+    end
+end))
+
+--=============================================================
+--  LIMPIEZA
+--=============================================================
+_G.VeniceHubCleanup = function()
+    runtime.espLoop = false
+    pcall(stopFly)
+    pcall(setNoclip, false)
+    pcall(stopClicker)
+    pcall(vehStopAll)
+    pcall(setESP, false)
+    pcall(setAim, false)
+    if clicker.conn then pcall(function() clicker.conn:Disconnect() end) end
+    for _, c in ipairs(conns) do pcall(function() c:Disconnect() end) end
+    table.clear(conns)
+    pcall(function() screen:Destroy() end)
+    _G.VeniceHubCleanup = nil
+end
+
+loadWaypoints()
+renderWaypoints()
+renderPlayers()
+notify("Hub cargado", C.good)
